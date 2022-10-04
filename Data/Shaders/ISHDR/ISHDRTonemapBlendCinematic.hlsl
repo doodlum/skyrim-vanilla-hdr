@@ -246,9 +246,9 @@ PS_OUTPUT main(PS_INPUT input)
 
 	bool scalebloom = (0.5 <= Params01[0].x);
 	float3 bloom = TextureBloom.Sample(TextureBloomSampler, (scalebloom) ? scaleduv.xy : input.TexCoord.xy);
-	bloom = lerp(Luminance(bloom), bloom, 0.5f) * 0.5f;
+	bloom = lerp(Luminance(bloom), bloom, 0.5f) * 0.25f;
 
-	float2 middlegray = TextureAdaptation.Sample(TextureAdaptationSampler, input.TexCoord.xy).xy;
+	float2 adaptation = TextureAdaptation.Sample(TextureAdaptationSampler, input.TexCoord.xy).xy;
 
 	float bloomFactor = Params01[2].x;
 
@@ -259,7 +259,11 @@ PS_OUTPUT main(PS_INPUT input)
 	float   contrast = Params01[3].z;    // 0 == no contrast
 	float3  tint_color = Params01[4].rgb;  // tint color
 	float   tint_weight = Params01[4].a;    // 0 == no tint
-	color *= middlegray.y / middlegray.x;
+
+	float middlegray = adaptation.x;
+	float adaptation_min = 0.2;
+	float adaptation_max = 0.3;
+	color /= middlegray * adaptation_max + adaptation_min;
 	color *= brightness;
 	color /= GammaInvX_FirstPersonY_AlphaPassZ_CreationKitW.x;
 
@@ -270,29 +274,26 @@ PS_OUTPUT main(PS_INPUT input)
 	color = LogCToLinear(color);
 
 	float whiteFactor = 32.0f / Params01[2].y;
-	color = Uncharted2(color, (useFilmic ? 8.0f : 10.0f), whiteFactor);
+	color = Uncharted2(color, (useFilmic ? 2.5f : 2.0f), whiteFactor);
 
 	color = WhiteBalance(color, float3(1.0f, 1.0f, 1.05f));
 	float grey = Luminance(color);
-	color = lerp(grey, color, saturation * 1.5);
+	color = lerp(grey, color, saturation * 1.35);
 	color = lerp(color, tint_color * grey, tint_weight);
 
 #ifdef FADE
-	float3  fade = Params01[5].rgb;  // fade current scene to specified color, mostly used in special effects
+	float3  fade = Params01[5].rgb;  		// fade current scene to specified color, mostly used in special effects
 	float   fade_weight = Params01[5].a;    // 0 == no fade
 	color. = lerp(color, fade, fade_weight);
 #endif
 
 	float tempgray = Luminance(color);
 
-	// Reinhard desaturates shadows, Hable does not
-	if (!useFilmic) {
-		float4	tempvar;
-		tempvar.x = saturate(1.0 - tempgray);
-		tempvar.x *= tempvar.x;
-		tempvar.x *= tempvar.x;
-		color = lerp(color, tempgray, saturate(0.75f - tint_weight) * tempvar.x);
-	}
+	float4	tempvar;
+	tempvar.x = saturate(1.0 - tempgray);
+	tempvar.x *= tempvar.x;
+	tempvar.x *= tempvar.x;
+	color = lerp(color, tempgray, saturate(0.75f - tint_weight) * tempvar.x);
 
 	color += triDither(color, scaleduv, tempgray);
 	color = saturate(color);
