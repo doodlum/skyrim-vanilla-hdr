@@ -1,0 +1,2 @@
+#define FADE
+#include "ISHDRTonemapBlendCinematic.hlsl"
