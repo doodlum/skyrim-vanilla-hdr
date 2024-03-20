@@ -1,6 +1,70 @@
-// Based off of work by kingeric1992, aers and nukem
+//----------------------------------------------------------------------------------------------//
+//																								//
+//						enbeffect.fx file by LonelyKitsuune aka Skratzer						//
+//						  for Skyrim SE ENB (DirectX 11 Shader Model 5)							//
+//																								//
+//			   Copyright (c) 2018-2020 LonelyKitsuune / T.Thanner - CC BY-NC-ND 4.0				//
+//																								//
+//-------------------------------------------CREDITS--------------------------------------------//
+//																								//
+//								 Boris Vorontsov for ENBSeries									//
+//						   Further credits above the respective shaders							//
+//																								//
+//------------------------------------------THANKS TO-------------------------------------------//
+//																								//
+//						Timothy Lottes for his VDR Tonemapper presentation						//
+//							  John Hable for his filmic worlds blog								//
+//							 kingeric1992 and prod80 for inspiration							//
+//																								//
+//----------------------------------------------------------------------------------------------//
+//								==================================								//
+//								//     Silent Horizons ENB		//								//
+//								//								//								//
+//								//		by LonelyKitsuune		//								//
+//								==================================								//
+//----------------------------------------------------------------------------------------------//
+
+#ifdef SHADERTOOLS
+#include "../ISHDR/VanillaHDRSettings.fxh"
+#else
+#include "VanillaHDRSettings.fxh"
+#endif
+
+//----------------------------------------------------------------------------------------------//
+
+float4 Timer;								
+float4 ScreenSize;		
+float  ENightDayFactor;	
+float  EInteriorFactor;	
+float  FieldOfView;		
+float4 Weather;		
+float4 TimeOfDay1;		
+float4 TimeOfDay2;					
+float4 tempF1;
+float4 tempF2;
+float4 tempF3;
+float4 tempInfo1;
+float4 tempInfo2;
+SamplerState Linear_Sampler;
+#ifdef SHADERTOOLS
+#include "../ISHDR/enbHelper_Common.fxh"
+#else
+#include "enbHelper_Common.fxh"
+#endif
+
+#undef DNI_SEPARATION
+#undef TODIE_SEPARATION
+#define DNI_SEPARATION(x) SETTING_##x
+#define TODIE_SEPARATION(x) SETTING_##x
+
+#undef LUM_709
+#undef DELTA
+#define LUM_709	float3(0.212500006,0.715399981,0.0720999986)
+#define DELTA 9.99999975e-06
+
+// Vanilla post-processing based off of work by kingeric1992, aers and nukem
 // http://enbseries.enbdev.com/forum/viewtopic.php?f=7&t=5278
-// Adapted by doodlez, some tidbits from L00ping
+// Adapted by doodlez
 
 Texture2D<float4> TextureAdaptation : register(t2);
 
@@ -57,9 +121,6 @@ struct PS_OUTPUT
 	float4 Color : SV_Target0;
 };
 
-#define DELTA 9.99999975e-06
-#define LUM_709 float3(0.212500006,0.715399981,0.0720999986)
-
 float3 Vanilla(PS_INPUT input)
 {
 	float2 scaleduv = clamp(0.0, float2(DynamicRes_InvWidthX_InvHeightY_WidthClampZ_HeightClampW.z, DynamicRes_WidthX_HeightY_PreviousWidthZ_PreviousHeightW.y), DynamicRes_WidthX_HeightY_PreviousWidthZ_PreviousHeightW.xy * input.TexCoord.xy);
@@ -109,90 +170,106 @@ float3 Vanilla(PS_INPUT input)
 	return color.rgb;
 }
 
-// http://filmicworlds.com/blog/filmic-tonemapping-operators/
 
-float3 Uncharted2Tonemap(float3 x) {
-	float A = 0.15;
-	float B = 0.50;
-	float C = 0.10;
-	float D = 0.20;
-	float E = 0.02;
-	float F = 0.30;
-	return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
-}
 
-float3 Uncharted2(float3 color, float exposureBias, float W) {
-	float3 curr = Uncharted2Tonemap(exposureBias * color);
-	float3 whiteScale = 1.0 / Uncharted2Tonemap(float3(W, W, W));
-	return curr * whiteScale;
-}
 
-float Luminance(float3 linearRgb)
+//----------------------------------------------------------------------------------------------//
+//											 Functions											//
+//																								//
+//----------------------------------------------------------------------------------------------//
+
+
+
+//Modified Uncharted 2 tonemapper (Original by John Hable)
+float  Uncharted2Curve(float A, float B, float C, float D, float E, float F, float  X)
+{ return zerolim((X * (A * X + C * B) + D * E) / deltalim(X * (A * X + B) + D * F) - E / F); }
+
+float3 Uncharted2Curve(float A, float B, float C, float D, float E, float F, float3 X)
+{ return zerolim((X * (A * X + C * B) + D * E) / deltalim(X * (A * X + B) + D * F) - E / F); }
+
+
+
+#define NI nointerpolation
+
+struct TonemapperParams
 {
-	return dot(linearRgb, float3(0.2126729, 0.7151522, 0.0721750));
-}
-
-float3 Saturation(float3 c, float sat)
-{
-	float luma = Luminance(c);
-	return luma.xxx + sat.xxx * (c - luma.xxx);
-}
-
-float3 Contrast(float3 c, float midpoint, float contrast)
-{
-	return (c - midpoint) * contrast + midpoint;
-}
-
-static const float3x3 LIN_2_LMS_MAT = {
-	3.90405e-1, 5.49941e-1, 8.92632e-3,
-	7.08416e-2, 9.63172e-1, 1.35775e-3,
-	2.31082e-2, 1.28021e-1, 9.36245e-1
+   float  ExposureBias;
+   float  ShoulderStrength; //A
+   float  LinearStrength;   //B
+   float  LinearAngle;      //C
+   float  ToeStrength;      //D
+   float  ToeNumerator;     //E
+   float  ToeDenominator;   //F
+   float  LinearWhite;      //W
 };
 
-static const float3x3 LMS_2_LIN_MAT = {
-	2.85847e+0, -1.62879e+0, -2.48910e-2,
-	-2.10182e-1,  1.15820e+0,  3.24281e-4,
-	-4.18120e-2, -1.18169e-1,  1.06867e+0
+struct ShaderParams
+{
+NI float  GreyAdapt				: TEXCOORD1;
+NI float  UIHCG_Exposure		: TODIE0;
+NI float  UIHCG_Contrast		: TODIE1;
+NI float  UIHCG_ConMiddleGrey	: TODIE2;
+NI float  UIHCG_Saturation		: TODIE3;
+NI float3 UIHCG_Colorbalance	: TODIE4;
+NI TonemapperParams UITM		: TODIE5;
+NI float  UIAGIS_Tint			: AGIS0;
+#ifdef FADE
+NI float  UIAGIS_Fade			: AGIS1;
+#endif
+
+#if EBM_ENABLE
+NI float  UIB_Saturation		: BLOOM0;
+NI float  UIB_BloomIntensity	: BLOOM1;
+NI float3 UIB_BloomTint			: BLOOM2;
+NI float  UIB_Contrast			: BLOOM3;
+#endif
 };
 
-float3 WhiteBalance(float3 c, float3 balance)
+
+float Tonemap(float Luma, TonemapperParams IN)
 {
-	float3 lms = mul(LIN_2_LMS_MAT, c);
-	lms *= balance;
-	return mul(LMS_2_LIN_MAT, lms);
+	Luma *= IN.ExposureBias;
+	Luma  = Uncharted2Curve(IN.ShoulderStrength, IN.LinearStrength, IN.LinearAngle,
+							IN.ToeStrength, IN.ToeNumerator, IN.ToeDenominator, Luma);
+	Luma  = saturate(Luma * IN.LinearWhite);
+	return Luma;
 }
 
-//
-// Alexa LogC converters (El 1000)
-// See http://www.vocas.nl/webfm_send/964
-// Max range is ~58.85666
-//
-struct ParamsLogC
+float3 Tonemap(float3 Color, TonemapperParams IN)
 {
-	float cut;
-	float a, b, c, d, e, f;
-};
-
-static const ParamsLogC LogC =
-{
-	0.011361, // cut
-	5.555556, // a
-	0.047996, // b
-	0.244161, // c
-	0.386036, // d
-	5.301883, // e
-	0.092819  // f
-};
-
-float3 LinearToLogC(float3 x)
-{
-	return LogC.c * log10(LogC.a * x + LogC.b) + LogC.d;
+	Color *= IN.ExposureBias;
+	Color  = Uncharted2Curve(IN.ShoulderStrength, IN.LinearStrength, IN.LinearAngle,
+								IN.ToeStrength, IN.ToeNumerator, IN.ToeDenominator, Color);
+	Color  = saturate(Color * IN.LinearWhite);
+	return Color;
 }
 
-float3 LogCToLinear(float3 x)
-{
-	return (pow(10.0, (x - LogC.d) / LogC.c) - LogC.b) / LogC.a;
+// http://enbseries.enbdev.com/forum/viewtopic.php?t=6239
+
+#ifdef SHADERTOOLS
+#include "../ISHDR/ictcp_colorspaces.fx"
+#else
+#include "ictcp_colorspaces.fx"
+#endif
+
+float3 FrostbyteTonemap(float3 Color, TonemapperParams IN) 
+{ 
+  float3 ictcp = rgb2ictcp(Color); 
+  float saturation = pow(smoothstep(1.0, 1.0 - SETTING_UIFB_Desaturation, ictcp.x), 1.3); 
+  Color = ictcp2rgb(ictcp * float3(1.0, saturation.xx)); 
+  float3 perChannel = Tonemap(Color, IN); 
+  float peak = max(Color.x, max(Color.y, Color.z)); 
+  Color *= rcp(peak + 1e-6); 
+  Color *= Tonemap(peak, IN); ; 
+  Color = lerp(Color, perChannel, SETTING_UIFB_HueShift); 
+  Color = rgb2ictcp(Color); 
+  float saturationBoost = SETTING_UIFB_Resaturation * smoothstep(1.0, 0.5, ictcp.x); 
+  Color.yz = lerp(Color.yz, ictcp.yz * Color.x / max(1e-3, ictcp.x), saturationBoost); 
+  Color = ictcp2rgb(Color); 
+  return Color; 
 }
+
+
 
 // TRI-DITHERING FUNCTION by SANDWICH-MAKER
 
@@ -236,71 +313,150 @@ float3 triDither(float3 color, float2 uv, float timer)
 		lerp(uni.z, tri.z, min(lo.z, hi.z))) * lsb;
 }
 
+
 PS_OUTPUT main(PS_INPUT input)
 {
-	PS_OUTPUT psout;
+	//------------------------- Shader Parameters Stage ------------------------//
 
-	float2 scaleduv = clamp(0.0, float2(DynamicRes_InvWidthX_InvHeightY_WidthClampZ_HeightClampW.z, DynamicRes_WidthX_HeightY_PreviousWidthZ_PreviousHeightW.y), DynamicRes_WidthX_HeightY_PreviousWidthZ_PreviousHeightW.xy * input.TexCoord.xy);
+	ShaderParams OUT;
 
-	float3 color = TextureColor.Sample(TextureColorSampler, scaleduv.xy);
+	#if EBM_ENABLE
+		OUT.UIB_Saturation	   = DNI_SEPARATION(UIB_Saturation);
+		OUT.UIB_BloomIntensity = DNI_SEPARATION(UIB_BloomIntensity);
+		OUT.UIB_BloomTint	   = DNI_SEPARATION(UIB_BloomTint);
+		OUT.UIB_Contrast	   = DNI_SEPARATION(UIB_Contrast);
+	#endif //EBM_ENABLE
+	
+	OUT.UIHCG_Exposure	 	= exp2(TODIE_SEPARATION(UIHCG_Exposure));
+	OUT.UIHCG_Saturation    = TODIE_SEPARATION(UIHCG_Saturation);
+	OUT.UIHCG_Contrast		= TODIE_SEPARATION(UIHCG_Contrast);
+	OUT.UIHCG_ConMiddleGrey = TODIE_SEPARATION(UIHCG_ConMiddleGrey);
+	OUT.UIHCG_Colorbalance  = TODIE_SEPARATION(UIHCG_Colorbalance);
+	OUT.UIHCG_Colorbalance  = ColorToChroma(OUT.UIHCG_Colorbalance);
+	OUT.GreyAdapt			= clamp(TextureAdaptation.Sample(TextureAdaptationSampler, input.TexCoord.xy).x,
+							  TODIE_SEPARATION(UI_AdaptationMin),
+							  TODIE_SEPARATION(UI_AdaptationMax));
+	
+	OUT.UIAGIS_Tint = min(Params01[4].w, DNI_SEPARATION(UIAGIS_TintMax));
+	#ifdef FADE
+	OUT.UIAGIS_Fade = min(Params01[5].w, DNI_SEPARATION(UIAGIS_FadeMax));
+	#endif
 
-	bool scalebloom = (0.5 <= Params01[0].x);
-	float3 bloom = TextureBloom.Sample(TextureBloomSampler, (scalebloom) ? scaleduv.xy : input.TexCoord.xy);
-	bloom = lerp(Luminance(bloom), bloom, 0.5f) * 0.25f;
+	//Mix imagespace deltas into main color grading parameters
+	float IS_Saturation = clamp(Params01[3].x, DNI_SEPARATION(UIAGIS_SatMin ),
+											   DNI_SEPARATION(UIAGIS_SatMax ));
+	float IS_Contrast   = clamp(Params01[3].z, DNI_SEPARATION(UIAGIS_ConMin ),
+											   DNI_SEPARATION(UIAGIS_ConMax ));
+	float IS_Brightness = clamp(Params01[3].w, DNI_SEPARATION(UIAGIS_BrigMin),
+											   DNI_SEPARATION(UIAGIS_BrigMax));
+	
+	IS_Saturation = lerp(SETTING_UIAGIS_SatDef, IS_Saturation, SETTING_UIAGIS_SatMix);
+	IS_Contrast = lerp(SETTING_UIAGIS_ConDef, IS_Contrast, SETTING_UIAGIS_ConMix);
+	IS_Brightness = lerp(SETTING_UIAGIS_BrigDef, IS_Brightness, SETTING_UIAGIS_BrigMix);
 
-	float2 adaptation = TextureAdaptation.Sample(TextureAdaptationSampler, input.TexCoord.xy).xy;
+	OUT.UIHCG_Saturation += IS_Saturation - 1.0;
+	OUT.UIHCG_Contrast   += IS_Contrast   - 1.0;
+	OUT.UIHCG_Exposure   += IS_Brightness - 1.0;
+	
+	OUT.UITM.ExposureBias     = TODIE_SEPARATION(UITM_ExposureBias);
+	OUT.UITM.ShoulderStrength = TODIE_SEPARATION(UITM_ShoulderStrength);
+	OUT.UITM.LinearStrength   = TODIE_SEPARATION(UITM_LinearStrength);
+	OUT.UITM.LinearAngle      = TODIE_SEPARATION(UITM_LinearAngle);
+	OUT.UITM.ToeStrength      = TODIE_SEPARATION(UITM_ToeStrength);
+	OUT.UITM.ToeNumerator     = TODIE_SEPARATION(UITM_ToeNumerator);
+	OUT.UITM.ToeDenominator   = TODIE_SEPARATION(UITM_ToeDenominator);
+	OUT.UITM.LinearWhite      = TODIE_SEPARATION(UITM_LinearWhite);
+	OUT.UITM.LinearWhite      = rcp(deltalim(Uncharted2Curve(OUT.UITM.ShoulderStrength, OUT.UITM.LinearStrength, OUT.UITM.LinearAngle,
+								OUT.UITM.ToeStrength, OUT.UITM.ToeNumerator, OUT.UITM.ToeDenominator, OUT.UITM.LinearWhite)));
 
+	#if EBM_ENABLE
+		OUT.UIB_BloomTint = ColorToChroma(OUT.UIB_BloomTint);
+	#endif
+
+	//------------------------- Pixel Shader Stage ------------------------//
+
+	ShaderParams IN = OUT;
+
+	float2 scaledUV = clamp(0.0, float2(DynamicRes_InvWidthX_InvHeightY_WidthClampZ_HeightClampW.z, DynamicRes_WidthX_HeightY_PreviousWidthZ_PreviousHeightW.y), DynamicRes_WidthX_HeightY_PreviousWidthZ_PreviousHeightW.xy * input.TexCoord.xy);
+
+	float3 Color = TextureColor.Sample(TextureColorSampler, scaledUV.xy);
+	
+	bool scaleBloom = (0.5 <= Params01[0].x);
 	float bloomFactor = Params01[2].x;
+	float3 Bloom = TextureBloom.Sample(TextureBloomSampler, (scaleBloom) ? scaledUV.xy : input.TexCoord.xy);
 
-	color += (bloom * bloomFactor) / (1 + color);
+	//------------------------- Apply Game Imagespace and HDR Color Grading ------------------------//
+	
+	//Imagespace tint and combined saturation
+	float Grey  = dot(Color, K_LUM);
+	Color = lerp(Color, Params01[4].rgb * Grey, IN.UIAGIS_Tint);
+	Color = zerolim(lerp(Grey, Color, IN.UIHCG_Saturation));
 
-	float   brightness = Params01[3].w;    // intensity
-	float   saturation = Params01[3].x;   // 0 == gray scale
-	float   contrast = Params01[3].z;    // 0 == no contrast
-	float3  tint_color = Params01[4].rgb;  // tint color
-	float   tint_weight = Params01[4].a;    // 0 == no tint
+	//Combined logarithmic contrast and exposure adjustment
+	Color = log2(Color * IN.UIHCG_Exposure + DELTA);
+	Color = zerolim(exp2(lerp(IN.UIHCG_ConMiddleGrey, Color, IN.UIHCG_Contrast)) - DELTA);
 
-	float middlegray = adaptation.x;
-	float adaptation_min = 0.2;
-	float adaptation_max = 0.3;
-	color /= middlegray * adaptation_max + adaptation_min;
-	color *= brightness;
-	color /= GammaInvX_FirstPersonY_AlphaPassZ_CreationKitW.x;
+	//----------------------------------- Adaptation -----------------------------------//
+	
+	Color /= lerp(1.0, IN.GreyAdapt, SETTING_UI_AdaptationMix);
 
-	bool useFilmic = (0.5 < Params01[2].z);
+	//----------------------------------- Bloom Mixing -----------------------------------//
 
-	color = LinearToLogC(color);
-	color = Contrast(color, 0.5f, contrast);
-	color = LogCToLinear(color);
+	#if EBM_ENABLE
+		Bloom  = zerolim(lerp(dot(Bloom, K_LUM), Bloom, IN.UIB_Saturation));
+		Bloom *= IN.UIB_BloomTint;
+		Bloom *= IN.UIB_BloomIntensity;
+		Bloom  = lerp(Bloom, Bloom * Bloom, IN.UIB_Contrast);
+	#endif
 
-	float whiteFactor = 32.0f / Params01[2].y;
-	color = Uncharted2(color, (useFilmic ? 2.5f : 2.0f), whiteFactor);
+	Color += (Bloom  * saturate(bloomFactor));
 
-	color = WhiteBalance(color, float3(1.0f, 1.0f, 1.05f));
-	float grey = Luminance(color);
-	color = lerp(grey, color, saturation * 1.35);
-	color = lerp(color, tint_color * grey, tint_weight);
+	//----------------------------------- Selectable Tonemapping -----------------------------------//
 
-#ifdef FADE
-	float3  fade = Params01[5].rgb;  		// fade current scene to specified color, mostly used in special effects
-	float   fade_weight = Params01[5].a;    // 0 == no fade
-	color. = lerp(color, fade, fade_weight);
-#endif
+	#if TONEMAPPING_METHOD == 1
+		Color = Tonemap(Color, IN.UITM);
+	
+	#elif TONEMAPPING_METHOD == 2
+		Grey   = max3(Color);
+		Color /= Grey;
+		Color *= Tonemap(Grey, IN.UITM);
+	
+	#elif TONEMAPPING_METHOD == 3
+		Grey   = dot(Color, K_LUM);
+		Color /= Grey;
+		Color *= Tonemap(Grey, IN.UITM);
 
-	float tempgray = Luminance(color);
+	#elif TONEMAPPING_METHOD == 4
+		Color = FrostbyteTonemap(Color, IN.UITM);
+	#endif
 
-	float4	tempvar;
-	tempvar.x = saturate(1.0 - tempgray);
-	tempvar.x *= tempvar.x;
-	tempvar.x *= tempvar.x;
-	color = lerp(color, tempgray, saturate(0.75f - tint_weight) * tempvar.x);
+	//----------------------------------- Channel Crosstalk -----------------------------------//
 
-	color += triDither(color, scaleduv, tempgray);
-	color = saturate(color);
-	color = log2(color);
-	color *= 1.5;
-	color = exp2(color);
-	psout.Color.rgb = color;
+	#if ENABLE_CROSSTALK //Channel crosstalk (Timothy Lottes)
+		float  MaxColor = max3(Color);
+		float3 ColRatio = Color / MaxColor;
+		
+		ColRatio = lerp(ColRatio, 1.0, MaxColor);
+		ColRatio = pow(ColRatio, UICT_Saturation);
+		Color	 = lerp(Color, ColRatio * MaxColor, UICT_Weight);
+	#endif
+
+	Color = saturate(Color);
+	
+	//Colorbalance and imagespace fade
+	Color *= IN.UIHCG_Colorbalance;
+
+	#ifdef FADE
+		Color  = lerp(Color, Params01[5].rgb, IN.UIAGIS_Fade);
+	#endif
+
+	Color = log2(Color);
+	Color = Color * GammaInvX_FirstPersonY_AlphaPassZ_CreationKitW.x;
+	Color = exp2(Color);
+
+	Color += triDither(Color, scaledUV, Grey);
+	PS_OUTPUT psout;
+	psout.Color.rgb = Color;
 	psout.Color.a = 1.0f;
 	return psout;
 }
