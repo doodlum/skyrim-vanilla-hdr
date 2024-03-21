@@ -305,8 +305,8 @@ void main(float4 v0
   r2.xyz = r2.xyz + -r1.xyz;
   r0.xzw = r0.xxx * r2.xyz + r1.xyz;
   r0.xzw = cb2[1].www * r0.xzw;
-  o0.xyz = saturate(r0.yyy ? r0.xzw : r1.xyz);
-  o0.w = saturate(r1.w);
+  o0.xyz = r0.yyy ? r0.xzw : r1.xyz;
+  o0.w = r1.w;
   return;
 }
 #endif

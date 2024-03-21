@@ -322,7 +322,7 @@ void main(float4 v0
   o0.w = saturate(r2.w);
   r0.xyw = r0.www * r1.xyz + r2.xyz;
   r0.xyw = cb2[1].www * r0.xyw;
-  o0.xyz = saturate(r0.zzz ? r0.xyw : r2.xyz);
+  o0.xyz = r0.zzz ? r0.xyw : r2.xyz;
   return;
 }
 #endif
