@@ -1,3 +1,4 @@
+#if !defined(VR)
 // ---- Created with 3Dmigoto v1.3.16 on Fri Jul 22 12:31:05 2022
 Texture2D<float4> t6 : register(t6);
 
@@ -247,3 +248,65 @@ void main(
   o0.xyzw = r0.xyzw * r1.yyyy + r2.xyzw;
   return;
 }
+#else // VR
+// ---- Created with 3Dmigoto v1.3.16 on Sun Feb 25 19:41:50 2024
+Texture2D<float4> t2 : register(t2);
+
+Texture2D<float4> t0 : register(t0);
+
+SamplerState s2_s : register(s2);
+
+SamplerState s0_s : register(s0);
+
+cbuffer cb2 : register(b2) { float4 cb2[4]; }
+
+cbuffer cb12 : register(b12) { float4 cb12[87]; }
+
+// 3Dmigoto declarations
+#define cmp -
+
+void main(float4 v0
+          : SV_POSITION0, float2 v1
+          : TEXCOORD0, out float4 o0
+          : SV_Target0) {
+  float4 r0, r1, r2;
+  uint4 bitmask, uiDest;
+  float4 fDest;
+
+  r0.x = cmp(v1.x >= 0.5);
+  r0.y = r0.x ? 1.000000 : 0;
+  r0.x = r0.x ? 2 : 1;
+  r0.x = cb12[86].z * r0.x;
+  r1.x = 0.5 * r0.x;
+  r0.x = cb12[86].z * r0.y;
+  r0.x = 0.5 * r0.x;
+  r0.zw = cb12[85].xy * v1.xy;
+  r0.y = 0;
+  r0.xy = max(r0.zw, r0.xy);
+  r1.y = cb12[85].y;
+  r0.xy = min(r1.xy, r0.xy);
+  r0.z = t2.SampleLevel(s2_s, r0.xy, 0).x;
+  r1.xyzw = t0.SampleLevel(s0_s, r0.xy, 0).xyzw;
+  r0.x = r0.z * 1.00999999 + -0.00999999978;
+  r0.y = cmp(r0.z < 0.999998987);
+  r0.x = r0.x * 2 + -1;
+  r0.z = cb2[3].y + cb2[3].x;
+  r0.w = cb2[3].y + -cb2[3].x;
+  r0.x = -r0.x * r0.w + r0.z;
+  r0.z = dot(cb2[3].xx, cb2[3].yy);
+  r0.x = r0.z / r0.x;
+  r0.x = saturate(r0.x * cb2[0].y + -cb2[0].x);
+  r0.x = log2(r0.x);
+  r0.x = cb2[0].z * r0.x;
+  r0.x = exp2(r0.x);
+  r0.x = min(cb2[0].w, r0.x);
+  r2.xyz = cb2[2].xyz + -cb2[1].xyz;
+  r2.xyz = r0.xxx * r2.xyz + cb2[1].xyz;
+  r2.xyz = r2.xyz + -r1.xyz;
+  r0.xzw = r0.xxx * r2.xyz + r1.xyz;
+  r0.xzw = cb2[1].www * r0.xzw;
+  o0.xyz = saturate(r0.yyy ? r0.xzw : r1.xyz);
+  o0.w = saturate(r1.w);
+  return;
+}
+#endif
